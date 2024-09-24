@@ -35,10 +35,11 @@
 """
 Definition of widgets and models useable in funq.
 """
-from funq.tools import wait_for
+from funq.tools import wait_for, QtKeyDict, QtKeyboardModifierDict
 from funq.errors import FunqError
 import json
 import base64
+
 
 
 class TreeItem(object):  # pylint: disable=R0903
@@ -937,15 +938,66 @@ class QuickItem(Object):
 
     CPP_CLASS = "QQuickItem"
 
-    def click(self):
+    def click(self, xpos=-1, ypos=-1):
         """
         Click on the :class:`QuickItem`.
         """
         self.client.send_command(
             "quick_item_click",
-            oid=self.oid
+            oid=self.oid,
+            xpos=xpos,
+            ypos=ypos
+        )
+    
+    def dclick(self):
+        """
+        DoubleClick on the :class:`QuickItem`.
+        """
+        self.client.send_command(
+            "quick_item_click",
+            oid=self.oid,
+            mouseAction='doubleclick'
         )
 
+    def key_click(self, key, modifiers):
+        """
+        Click on QQuickItem with key + modifiers
+
+        :param:key is key from QtKeyDict, this dict is map of most common Qt::Key enum values.
+        :param:modifiers is array with keys from QtKeyboardModifierDict
+        """
+
+        modifiersList = []
+        for mod in modifiers:
+            modifiersList.append(QtKeyboardModifierDict[mod])
+
+        self.client.send_command(
+            "quick_item_key_click",
+            oid=self.oid,
+            key=QtKeyDict[key],
+            modifiers=modifiersList
+        )
+
+    def key_press(self, key, modifiers, duration):
+        """
+        Press on QQuickItem with key + modifiers and release after duration
+
+        :param:key is key from QtKeyDict, this dict is map of most common Qt::Key enum values.
+        :param:modifiers is array with keys from QtKeyboardModifierDict
+        :param:duration is duration of pressing in milliseconds
+        """
+
+        modifiersList = []
+        for mod in modifiers:
+            modifiersList.append(str(QtKeyboardModifierDict[mod]))
+
+        self.client.send_command(
+            "quick_item_key_press",
+            oid=self.oid,
+            key=str(QtKeyDict[key]),
+            modifiers=modifiersList,
+            duration=duration
+        )
 
 class QuickWindow(Widget):
     """
