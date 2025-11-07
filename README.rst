@@ -102,8 +102,25 @@ How does *funq* works
   to start a TCP server that will allow to interact with the application.
 
 - **funq** is a python package that offers an API to interact with a
-  **libFunq** TCP server. It is the client side of the project, and uses
-  nosetests to launch FUNctional Qt tests.
+  **libFunq** TCP server. It is the client side of the project, and ships
+  plugins for both ``nosetests`` and ``pytest`` so FUNctional Qt tests can
+  be executed with either runner.
+
+Running tests with pytest
+=========================
+
+The client package exposes a ``pytest`` plugin (entry point ``funq``).
+Once ``funq`` is installed, ``pytest`` discovers the plugin automatically.
+Run your suites with::
+
+  pytest --with-funq --funq-conf path/to/funq.conf
+
+``--with-funq`` enables the plugin, while the remaining options are the
+same as the historical nose integration (``--funq-conf``, ``--funq-gkit``,
+``--funq-attach-exe``, etc.). The plugin reads ``funq.conf``, launches the
+configured Qt application via the injector, registers the application
+contexts used by ``FunqTestCase``/``MultiFunqTestCase`` subclasses, and
+captures screenshots on failures just like the nose plugin.
 
 Compatibility
 =============

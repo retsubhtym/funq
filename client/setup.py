@@ -34,6 +34,7 @@ setup(
     install_requires=install_requires,
     package_data={'funq': ['aliases-gkits.conf']},
     entry_points={
-        'nose.plugins.0.10': ['funq = funq.noseplugin:FunqPlugin']
+        'nose.plugins.0.10': ['funq = funq.noseplugin:FunqPlugin'],
+        'pytest11': ['funq = funq.pytestplugin'],
     },
 )
