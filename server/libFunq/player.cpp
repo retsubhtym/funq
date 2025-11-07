@@ -326,6 +326,7 @@ QtJson::JsonObject Player::quick_item_find(const QtJson::JsonObject & command) {
     if (ctx.hasError()) {
         return ctx.lastError;
     }
+    ctx.widget->raise();
     QQuickItem * item;
     qulonglong id;
     QString qid = command["qid"].toString();
@@ -358,6 +359,12 @@ QtJson::JsonObject Player::quick_item_find(const QtJson::JsonObject & command) {
 }
 
 QtJson::JsonObject Player::active_widget(const QtJson::JsonObject & command) {
+
+    // Raise all windows. TODO refactor it
+    for (auto w : QApplication::allWindows()) {
+        w->raise();
+    }
+
     QObject * active;
     QString type = command["type"].toString();
     if (type == "modal") {
