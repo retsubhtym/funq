@@ -37,7 +37,6 @@ knowledge of the CeCILL v2.1 license and that you accept its terms.
 #include "objectpath.h"
 
 #include <QApplication>
-#include <QBackingStore>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDebug>
@@ -47,10 +46,10 @@ knowledge of the CeCILL v2.1 license and that you accept its terms.
 #include <QMetaProperty>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPaintEvent>
 #include <QPen>
 #include <QRegion>
 #include <QResizeEvent>
-#include <QRubberBand>
 #include <QScopedPointer>
 #include <QTextStream>
 #include <QVariant>
@@ -64,6 +63,8 @@ knowledge of the CeCILL v2.1 license and that you accept its terms.
 #include <QExposeEvent>
 #include <QGuiApplication>
 #include <QResizeEvent>
+#include <QSurface>
+#include <QSurfaceFormat>
 #include <QWindow>
 #endif
 
@@ -267,48 +268,65 @@ QQuickItem * findQuickItemAt(QQuickItem * item, const QPointF & scenePos, bool p
 
 #endif
 
-class HighlightOverlay {
-public:
-    virtual ~HighlightOverlay() {}
-    virtual void showRect(const QRect & globalRect) = 0;
-    virtual void hide() = 0;
-};
-
 }  // namespace
 
 #ifndef QT_NO_WIDGETS
-WidgetHighlightOverlay::WidgetHighlightOverlay()
-    : m_band(new QRubberBand(QRubberBand::Rectangle)) {
-    m_band->setWindowFlags(Qt::ToolTip | Qt::FramelessWindowHint |
-                           Qt::WindowStaysOnTopHint);
-    m_band->setAttribute(Qt::WA_TransparentForMouseEvents);
-    m_band->setPalette(QColor(Qt::red));
-    m_band->setStyleSheet(
-        "border: 2px solid #ff0000; background: rgba(255, 0, 0, 127);");
+WidgetHighlightOverlay::WidgetHighlightOverlay() : QWidget(nullptr) {
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    setAttribute(Qt::WA_TransparentForMouseEvents);
+    setAttribute(Qt::WA_NoSystemBackground);
+    setAttribute(Qt::WA_TranslucentBackground);
+    setAttribute(Qt::WA_ShowWithoutActivating);
+    setAttribute(Qt::WA_AlwaysStackOnTop);
 }
 
-WidgetHighlightOverlay::~WidgetHighlightOverlay() { delete m_band; }
-
 void WidgetHighlightOverlay::showRect(const QRect & globalRect) {
-    m_band->setGeometry(globalRect);
-    if (!m_band->isVisible()) {
-        m_band->show();
+    setGeometry(globalRect);
+    if (!isVisible()) {
+        show();
     } else {
-        m_band->raise();
+        raise();
+        update();
     }
 }
 
 void WidgetHighlightOverlay::hide() {
-    if (m_band->isVisible()) {
-        m_band->hide();
+    if (isVisible()) {
+        QWidget::hide();
     }
+}
+
+void WidgetHighlightOverlay::paintEvent(QPaintEvent * event) {
+    Q_UNUSED(event);
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QRect rect(QPoint(0, 0), size());
+    painter.fillRect(rect, QColor(255, 0, 0, 127));
+    QPen pen(QColor(255, 0, 0));
+    pen.setWidth(2);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(rect.adjusted(1, 1, -2, -2));
 }
 #endif  // QT_NO_WIDGETS
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
 WindowHighlightOverlay::WindowHighlightOverlay()
     : QWindow(), m_backingStore(new QBackingStore(this)) {
-    setFlags(Qt::ToolTip | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    setSurfaceType(QSurface::RasterSurface);
+#if QT_VERSION >= QT_VERSION_CHECK(5, 4, 0)
+    QSurfaceFormat fmt = format();
+    if (fmt.alphaBufferSize() < 8) {
+        fmt.setAlphaBufferSize(8);
+    }
+    setFormat(fmt);
+#endif
+    Qt::WindowFlags flags = Qt::ToolTip | Qt::FramelessWindowHint |
+                            Qt::WindowStaysOnTopHint;
+#if QT_VERSION >= QT_VERSION_CHECK(5, 4, 0)
+    flags |= Qt::WindowTransparentForInput;
+#endif
+    setFlags(flags);
     // QWindow::setColor(Qt::transparent);
 }
 
@@ -345,10 +363,14 @@ void WindowHighlightOverlay::renderOverlay() {
         return;
     }
     QRect rect(QPoint(0, 0), size());
-    m_backingStore->beginPaint(rect);
+    QRegion region(rect);
+    m_backingStore->beginPaint(region);
     QPaintDevice * device = m_backingStore->paintDevice();
     QPainter painter(device);
     painter.setRenderHint(QPainter::Antialiasing);
+    painter.setCompositionMode(QPainter::CompositionMode_Source);
+    painter.fillRect(rect, Qt::transparent);
+    painter.setCompositionMode(QPainter::CompositionMode_SourceOver);
     painter.fillRect(rect, QColor(255, 0, 0, 127));
     QPen pen(QColor(255, 0, 0));
     pen.setWidth(2);
@@ -357,7 +379,7 @@ void WindowHighlightOverlay::renderOverlay() {
     painter.drawRect(rect.adjusted(1, 1, -2, -2));
     painter.end();
     m_backingStore->endPaint();
-    m_backingStore->flush(rect);
+    m_backingStore->flush(region, this);
 }
 #endif  // QT_VERSION >= 5.0.0
 
@@ -374,6 +396,8 @@ Pick::Pick(PickHandler * handler, QObject * parent)
     if (qobject_cast<QApplication *>(QCoreApplication::instance())) {
         m_hasWidgetStack = true;
         m_highlightOverlay = new WidgetHighlightOverlay();
+    } else {
+        m_hasWidgetStack = false;
     }
 #endif
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
@@ -570,9 +594,14 @@ bool Pick::computeHighlightTarget(const QPoint & globalPos, QRect & outRect,
         target = 0;
         return false;
     }
+    const WindowHighlightOverlay * overlayWindow =
+        dynamic_cast<const WindowHighlightOverlay *>(m_highlightOverlay);
     const QList<QWindow *> windows = QGuiApplication::topLevelWindows();
     for (QWindow * window : windows) {
         if (!window || !window->isVisible()) {
+            continue;
+        }
+        if (overlayWindow && window == overlayWindow) {
             continue;
         }
         QRect rect(window->mapToGlobal(QPoint(0, 0)), window->size());

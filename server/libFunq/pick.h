@@ -40,9 +40,8 @@ knowledge of the CeCILL v2.1 license and that you accept its terms.
 #include <QPoint>
 #include <QRect>
 #include <QTextStream>
-
 #ifndef QT_NO_WIDGETS
-#include <QRubberBand>
+#include <QWidget>
 #endif
 
 #if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
@@ -83,15 +82,18 @@ public:
 };
 
 #ifndef QT_NO_WIDGETS
-class WidgetHighlightOverlay : public HighlightOverlay {
+class QPaintEvent;
+
+class WidgetHighlightOverlay : public QWidget, public HighlightOverlay {
 public:
     WidgetHighlightOverlay();
-    ~WidgetHighlightOverlay() override;
+    ~WidgetHighlightOverlay() override = default;
+
     void showRect(const QRect & globalRect) override;
     void hide() override;
 
-private:
-    QRubberBand * m_band;
+protected:
+    void paintEvent(QPaintEvent * event) override;
 };
 #endif
 
