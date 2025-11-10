@@ -37,7 +37,21 @@ knowledge of the CeCILL v2.1 license and that you accept its terms.
 
 #include <QEvent>
 #include <QObject>
+#include <QPoint>
+#include <QRect>
 #include <QTextStream>
+
+#ifndef QT_NO_WIDGETS
+#include <QRubberBand>
+#endif
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+#include <QBackingStore>
+#include <QExposeEvent>
+#include <QResizeEvent>
+#include <QScopedPointer>
+#include <QWindow>
+#endif
 
 class PickHandler {
 public:
@@ -52,11 +66,54 @@ public:
 
     inline bool showProperties() { return m_showProperties; }
     inline void setShowProperties(bool show) { m_showProperties = show; }
+    inline bool showGeometry() { return m_showGeometry; }
+    inline void setShowGeometry(bool show) { m_showGeometry = show; }
 
 private:
     QTextStream m_stream;
     bool m_showProperties;
+    bool m_showGeometry;
 };
+
+class HighlightOverlay {
+public:
+    virtual ~HighlightOverlay() {}
+    virtual void showRect(const QRect & globalRect) = 0;
+    virtual void hide() = 0;
+};
+
+#ifndef QT_NO_WIDGETS
+class WidgetHighlightOverlay : public HighlightOverlay {
+public:
+    WidgetHighlightOverlay();
+    ~WidgetHighlightOverlay() override;
+    void showRect(const QRect & globalRect) override;
+    void hide() override;
+
+private:
+    QRubberBand * m_band;
+};
+#endif
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 0, 0)
+class WindowHighlightOverlay : public QWindow, public HighlightOverlay {
+    Q_OBJECT
+
+public:
+    WindowHighlightOverlay();
+    ~WindowHighlightOverlay() override;
+    void showRect(const QRect & globalRect) override;
+    void hide() override;
+
+protected:
+    void exposeEvent(QExposeEvent * event) override;
+    void resizeEvent(QResizeEvent * event) override;
+
+private:
+    void renderOverlay();
+    QScopedPointer<QBackingStore> m_backingStore;
+};
+#endif
 
 class Pick : public QObject {
 public:
@@ -67,6 +124,17 @@ public:
 
 private:
     PickHandler * m_handler;
+    HighlightOverlay * m_highlightOverlay;
+#ifndef QT_NO_WIDGETS
+    bool m_hasWidgetStack;
+#endif
+    QObject * m_highlightTarget;
+    QPoint m_highlightPos;
+
+    void showHighlight(const QRect & globalRect);
+    void hideHighlight();
+    bool computeHighlightTarget(const QPoint & globalPos, QRect & outRect,
+                                QObject *& target, QPoint & localPos) const;
 };
 
 #endif  // PICK_H

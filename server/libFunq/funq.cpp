@@ -144,8 +144,11 @@ bool Funq::hook(void ** data) {
 }
 
 bool Funq::eventFilter(QObject * receiver, QEvent * event) {
-    m_pick->handleEvent(receiver, event);
-    return false;
+    bool handled = m_pick->handleEvent(receiver, event);
+    if (handled) {
+        event->accept();
+    }
+    return handled;
 }
 
 void Funq::activate(bool check_activation) {

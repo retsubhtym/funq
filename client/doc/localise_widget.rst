@@ -17,8 +17,16 @@ For example, to find widgets from qtcreator application:
   funq --pick qtcreator
 
 Then you need to pick on a widget while pressing *Ctrl* and *Shift*.
-This will print on stdout the complete widget path and the available
-properties.
+This will print on stdout the complete widget path, the widget class,
+its geometry (including QML ``x``/``y``/``implicitWidth`` fallbacks) and
+the available properties. Each block is now separated by ``-----`` lines,
+and when the widget belongs to a ``QGraphicsView`` the corresponding
+graphics item id/geometry is displayed as well.
+
+Holding *Ctrl* + *Shift* also enables a Squish-like picker: the widget
+under the cursor is highlighted in red, the click is intercepted (the
+application does not receive it), and the widget information is dumped to
+stdout.
 
 Here is an example of output when clicking on the "File" menu in qtcreator::
 
