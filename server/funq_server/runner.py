@@ -71,6 +71,8 @@ class Runner(object):
                             version=funq_server.__version__)
         parser.add_argument('--pick', action='store_true',
                             help="Use PICK MODE, to find widget's paths")
+        parser.add_argument('--preferLargestArea', action='store_true',
+                            help="In PICK MODE prefer items with largets area")
         parser.add_argument('--host', type=str,
                             help="Specify funq host.")
         parser.add_argument('--port', type=int,
@@ -103,6 +105,8 @@ class Runner(object):
 
         if opts.pick:
             env['FUNQ_MODE_PICK'] = '1'
+        if opts.preferLargestArea:
+            env['FUNQ_MODE_PICK_LARGEST'] = '1'
         if opts.port is not None:
             env['FUNQ_PORT'] = str(opts.port)
         if opts.host is not None:

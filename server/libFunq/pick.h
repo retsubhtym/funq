@@ -134,7 +134,8 @@ private:
     void showHighlight(const QRect & globalRect);
     void hideHighlight();
     bool computeHighlightTarget(const QPoint & globalPos, QRect & outRect,
-                                QObject *& target, QPoint & localPos) const;
+                                QObject *& target, QPoint & localPos,
+                                bool buttonsOnly) const;
 };
 
 #endif  // PICK_H

@@ -112,61 +112,159 @@ bool isPickableItem(QQuickItem * item, const QPointF & scenePos,
     return true;
 }
 
-QQuickItem * findQuickItemAt(QQuickItem * item, const QPointF & scenePos,
-                             int level = 0) {
-    if (!item) {
-        return nullptr;
+
+static inline bool isButtonLike(const QQuickItem *item) {
+    if (!item) return false;
+
+    static const char *kButtonTypes[] = {
+        "QQuickAbstractButton",
+        "QQuickButton",
+        "QQuickToolButton",
+        "QQuickCheckBox",
+        "QQuickRadioButton",
+        "QQuickSwitch",
+        "QQuickMenuItem",
+        nullptr
+    };
+    for (const char **t = kButtonTypes; *t; ++t) {
+        if (item->inherits(*t)) return true;
     }
+    const QMetaObject *mo = item->metaObject();
+    if (!mo) return false;
+    return QString::fromLatin1(mo->className()).contains("Button", Qt::CaseInsensitive);
+}
+
+static inline QQuickItem *deepestItemUnderPoint(QQuickItem *root, const QPointF &scenePos) {
+    if (!root) return nullptr;
+
+    QPointF rootLocal = root->mapFromScene(scenePos);
+    if (!root->isVisible() || !root->isEnabled() || root->opacity() <= 0.0 || !root->contains(rootLocal))
+        return nullptr;
+
+    QQuickItem *current = root;
+    for (;;) {
+        QPointF local = current->mapFromScene(scenePos);
+        QQuickItem *next = current->childAt(local.x(), local.y());
+        if (!next) break;
+        if (!next->isVisible() || !next->isEnabled() || next->opacity() <= 0.0)
+            break;
+        current = next;
+    }
+    return current;
+}
+
+static inline QQuickItem *promoteToButtonAncestor(QQuickItem *leaf) {
+    for (QQuickItem *it = leaf; it; it = it->parentItem()) {
+        if (isButtonLike(it))
+            return it;
+    }
+    return leaf;
+}
+
+QQuickItem * findQuickItemAt(QQuickItem * item, const QPointF & scenePos, bool preferButtons) {
+    if (!item)
+        return nullptr;
+
     QList<QQuickItem *> children = item->childItems();
     std::sort(children.begin(), children.end(),
               [](QQuickItem * left, QQuickItem * right) {
-                  if (qFuzzyCompare(left->z(), right->z())) {
+                  if (qFuzzyCompare(left->z(), right->z()))
                       return left < right;
-                  }
                   return left->z() < right->z();
               });
+
     QList<QQuickItem*> found;
     for (int i = children.size() - 1; i >= 0; --i) {
-        QQuickItem * child = children.at(i);
-        if (!child) {
-            continue;
-        }
-        if (QQuickItem * hit = findQuickItemAt(child, scenePos, level + 1)) {
+        QQuickItem *child = children.at(i);
+        if (!child) continue;
+        if (QQuickItem *hit = findQuickItemAt(child, scenePos, preferButtons))
             found.push_back(hit);
-        }
     }
 
+    const char* env = getenv("FUNQ_MODE_PICK_LARGEST");
+    const bool preferLargestArea = env && strcmp(env, "1") == 0;
+
     if (!found.isEmpty()) {
-        // Select the most specific child:
-        // the one with the smallest bounding rect and center closest to scenePos
-        QQuickItem * bestItem = nullptr;
-        qreal bestScore = std::numeric_limits<qreal>::max();
+        const qreal kDistEps       = 0.75;
+        const qreal kAreaEps       = 1.0;
+        const qreal kButtonBoostPx = 4.0;
 
-        for (QQuickItem * candidate : found) {
-            QRectF rect = candidate->mapRectToScene(candidate->boundingRect());
-            qreal area = rect.width() * rect.height();
-            QPointF center = rect.center();
-            qreal distance = QLineF(center, scenePos).length();
+        QQuickItem *bestItem = nullptr;
+        qreal bestDist = std::numeric_limits<qreal>::max();
+        qreal bestArea = preferLargestArea
+                         ? -std::numeric_limits<qreal>::max()
+                         :  std::numeric_limits<qreal>::max();
 
-            // Smaller area is preferred; if equal, closer center wins
-            qreal score = area + distance * 0.1; // area dominates, distance refines
-            if (score < bestScore) {
-                bestScore = score;
+        for (QQuickItem *candidate : found) {
+            const QRectF rect = candidate->mapRectToScene(candidate->boundingRect());
+            if (rect.isEmpty()) continue;
+
+            const qreal area = rect.width() * rect.height();
+            const qreal dist = QLineF(rect.center(), scenePos).length();
+
+            bool better = false;
+            const bool candIsBtn = preferButtons && isButtonLike(candidate);
+            const bool bestIsBtn = preferButtons && bestItem && isButtonLike(bestItem);
+
+            if (preferButtons && bestItem) {
+                if (candIsBtn && !bestIsBtn) {
+                    if (dist <= bestDist + kButtonBoostPx)
+                        better = true;
+                } else if (!candIsBtn && bestIsBtn) {
+                    if (dist + kButtonBoostPx >= bestDist)
+                        better = false;
+                }
+            }
+
+            if (!better) {
+                if (dist + kDistEps < bestDist)
+                    better = true;
+                else if (qAbs(dist - bestDist) <= kDistEps) {
+                    if (preferLargestArea) {
+                        if (area > bestArea + kAreaEps)
+                            better = true;
+                    } else {
+                        if (area + kAreaEps < bestArea)
+                            better = true;
+                    }
+                    if (!better && preferButtons) {
+                        if (candIsBtn && !bestIsBtn)
+                            better = true;
+                    }
+                }
+            }
+
+            if (better) {
                 bestItem = candidate;
+                bestDist = dist;
+                bestArea = area;
             }
         }
 
         if (bestItem) {
+            // ---- NEW refinement block ----
+            if (preferButtons) {
+                // Use precise hit-testing to refine to actual visual leaf.
+                if (QQuickItem *leaf = deepestItemUnderPoint(bestItem, scenePos)) {
+                    // Prefer promoting to a button ancestor if found.
+                    QQuickItem *button = promoteToButtonAncestor(leaf);
+                    if (button && button != bestItem)
+                        bestItem = button;
+                }
+            }
+            // ---- END refinement block ----
+
             return bestItem;
         }
     }
 
+    // Fallback: current item if it’s pickable.
     QPointF localPoint;
-    if (!isPickableItem(item, scenePos, &localPoint)) {
+    if (!isPickableItem(item, scenePos, &localPoint))
         return nullptr;
-    }
     return item;
 }
+
 #endif
 
 class HighlightOverlay {
@@ -306,12 +404,13 @@ bool Pick::handleEvent(QObject * receiver, QEvent * event) {
         bool ctrlShift = (mods & Qt::ShiftModifier) &&
                          (mods & Qt::ControlModifier);
         bool highlightMode = ctrlShift;
+        bool buttonsOnly = mods & Qt::AltModifier;
 
         QRect candidateRect;
         QObject * candidateTarget = nullptr;
         QPoint candidatePos;
-        bool hasCandidate = computeHighlightTarget(
-            evt->globalPos(), candidateRect, candidateTarget, candidatePos);
+        bool hasCandidate = computeHighlightTarget(evt->globalPos(), candidateRect,
+                                   candidateTarget, candidatePos, buttonsOnly);
 
         if (highlightMode && hasCandidate) {
             showHighlight(candidateRect);
@@ -452,7 +551,8 @@ void Pick::hideHighlight() {
 }
 
 bool Pick::computeHighlightTarget(const QPoint & globalPos, QRect & outRect,
-                                  QObject *& target, QPoint & localPos) const {
+                                  QObject *& target, QPoint & localPos,
+                                  bool buttonsOnly) const {
 #ifndef QT_NO_WIDGETS
     QWidget * widget =
         m_hasWidgetStack ? QApplication::widgetAt(globalPos) : 0;
@@ -484,7 +584,7 @@ bool Pick::computeHighlightTarget(const QPoint & globalPos, QRect & outRect,
             auto windowPos = window->mapFromGlobal(globalPos);
             auto scenePos = QPointF(windowPos);
             if (auto content = quickWindow->contentItem()) {
-                QQuickItem * quickItem = findQuickItemAt(content, scenePos);
+                QQuickItem * quickItem = findQuickItemAt(content, scenePos, buttonsOnly);
                 if (quickItem && quickItem != content) {
                     QPointF sceneTopLeft = quickItem->mapToScene(QPointF(0, 0));
                     QPoint globalTopLeft = window->mapToGlobal(QPoint(
